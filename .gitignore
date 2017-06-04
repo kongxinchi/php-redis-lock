@@ -1,3 +1,5 @@
 /.idea/
 /vendor/
+/test/bootstrap.php
 composer.lock
+*.rdb

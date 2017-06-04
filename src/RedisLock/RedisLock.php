@@ -10,8 +10,8 @@
  */
 namespace RedisLock;
 
-use RedisClient\Exception\ErrorResponseException;
-use RedisClient\RedisClient;
+use RedisLock\Client\RedisClientAdapter;
+use RedisLock\Client\RedisClientInterface;
 use RedisLock\Exception\InvalidArgumentException;
 use RedisLock\Exception\LockException;
 use RedisLock\Exception\LockHasAcquiredAlreadyException;
@@ -53,7 +53,7 @@ class RedisLock implements LockInterface {
     ';
 
     /**
-     * @var RedisClient
+     * @var RedisClientInterface
      */
     protected $Redis;
 
@@ -84,15 +84,19 @@ class RedisLock implements LockInterface {
     protected $catchExceptions = false;
 
     /**
-     * @param RedisClient $Redis
+     * @param RedisClientInterface $Redis
      * @param string $key
      * @param int $flags
      * @throws InvalidArgumentException
      */
-    public function __construct(RedisClient $Redis, $key, $flags = 0) {
+    public function __construct($Redis, $key, $flags = 0) {
         if (!isset($key)) {
             throw new InvalidArgumentException('Invalid key for Lock');
         }
+        if (is_a($Redis, 'RedisClient\RedisClient')) {
+            $Redis = new RedisClientAdapter($Redis);
+        }
+
         $this->Redis = $Redis;
         $this->key = (string) $key;
         $this->flags = (int) $flags;
@@ -131,17 +135,9 @@ class RedisLock implements LockInterface {
      * @param string[]|null $keys
      * @param string[]|null $args
      * @return mixed
-     * @throws ErrorResponseException
      */
     protected function execLua($script, $sha1, $keys = null, $args = null) {
-        try {
-            return $this->Redis->evalsha($sha1, $keys, $args);
-        } catch (ErrorResponseException $Ex) {
-            if (0 === strpos($Ex->getMessage(), 'NOSCRIPT')) {
-                return $this->Redis->eval($script, $keys, $args);
-            }
-            throw $Ex;
-        }
+        return $this->Redis->execLua($script, $sha1, $keys, $args);
     }
 
     /**
@@ -168,7 +164,7 @@ class RedisLock implements LockInterface {
         $sleep = ($sleep ?: self::LOCK_DEFAULT_WAIT_SLEEP) * 1000000;
 
         do {
-            if ($this->Redis->set($this->key, $this->token, null, $lockTime * 1000, 'NX')) {
+            if ($this->Redis->set($this->key, $this->token, 'PX', $lockTime * 1000, 'NX')) {
                 $this->isAcquired = true;
                 return true;
             }
